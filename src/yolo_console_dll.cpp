@@ -10,142 +10,14 @@
 #include <mutex>         // std::mutex, std::unique_lock
 #include <cmath>
 
-
-// It makes sense only for video-Camera (not for video-File)
-// To use - uncomment the following line. Optical-flow is supported only by OpenCV 3.x - 4.x
-//#define TRACK_OPTFLOW
-//#define GPU
-
-// To use 3D-stereo camera ZED - uncomment the following line. ZED_SDK should be installed.
-//#define ZED_STEREO
-
-
 #include "yolo_v2_class.hpp"    // imported functions from DLL
 
+//#define ROI
 #ifdef OPENCV
-#ifdef ZED_STEREO
-#include <sl_zed/Camera.hpp>
-#pragma comment(lib, "sl_core64.lib")
-#pragma comment(lib, "sl_input64.lib")
-#pragma comment(lib, "sl_zed64.lib")
 
-float getMedian(std::vector<float> &v) {
-    size_t n = v.size() / 2;
-    std::nth_element(v.begin(), v.begin() + n, v.end());
-    return v[n];
-}
-
-std::vector<bbox_t> get_3d_coordinates(std::vector<bbox_t> bbox_vect, cv::Mat xyzrgba)
-{
-    bool valid_measure;
-    int i, j;
-    const unsigned int R_max_global = 10;
-
-    std::vector<bbox_t> bbox3d_vect;
-
-    for (auto &cur_box : bbox_vect) {
-
-        const unsigned int obj_size = std::min(cur_box.w, cur_box.h);
-        const unsigned int R_max = std::min(R_max_global, obj_size / 2);
-        int center_i = cur_box.x + cur_box.w * 0.5f, center_j = cur_box.y + cur_box.h * 0.5f;
-
-        std::vector<float> x_vect, y_vect, z_vect;
-        for (int R = 0; R < R_max; R++) {
-            for (int y = -R; y <= R; y++) {
-                for (int x = -R; x <= R; x++) {
-                    i = center_i + x;
-                    j = center_j + y;
-                    sl::float4 out(NAN, NAN, NAN, NAN);
-                    if (i >= 0 && i < xyzrgba.cols && j >= 0 && j < xyzrgba.rows) {
-                        cv::Vec4f &elem = xyzrgba.at<cv::Vec4f>(j, i);  // x,y,z,w
-                        out.x = elem[0];
-                        out.y = elem[1];
-                        out.z = elem[2];
-                        out.w = elem[3];
-                    }
-                    valid_measure = std::isfinite(out.z);
-                    if (valid_measure)
-                    {
-                        x_vect.push_back(out.x);
-                        y_vect.push_back(out.y);
-                        z_vect.push_back(out.z);
-                    }
-                }
-            }
-        }
-
-        if (x_vect.size() * y_vect.size() * z_vect.size() > 0)
-        {
-            cur_box.x_3d = getMedian(x_vect);
-            cur_box.y_3d = getMedian(y_vect);
-            cur_box.z_3d = getMedian(z_vect);
-        }
-        else {
-            cur_box.x_3d = NAN;
-            cur_box.y_3d = NAN;
-            cur_box.z_3d = NAN;
-        }
-
-        bbox3d_vect.emplace_back(cur_box);
-    }
-
-    return bbox3d_vect;
-}
-
-cv::Mat slMat2cvMat(sl::Mat &input) {
-    // Mapping between MAT_TYPE and CV_TYPE
-    int cv_type = -1;
-    switch (input.getDataType()) {
-    case sl::MAT_TYPE_32F_C1:
-        cv_type = CV_32FC1;
-        break;
-    case sl::MAT_TYPE_32F_C2:
-        cv_type = CV_32FC2;
-        break;
-    case sl::MAT_TYPE_32F_C3:
-        cv_type = CV_32FC3;
-        break;
-    case sl::MAT_TYPE_32F_C4:
-        cv_type = CV_32FC4;
-        break;
-    case sl::MAT_TYPE_8U_C1:
-        cv_type = CV_8UC1;
-        break;
-    case sl::MAT_TYPE_8U_C2:
-        cv_type = CV_8UC2;
-        break;
-    case sl::MAT_TYPE_8U_C3:
-        cv_type = CV_8UC3;
-        break;
-    case sl::MAT_TYPE_8U_C4:
-        cv_type = CV_8UC4;
-        break;
-    default:
-        break;
-    }
-    return cv::Mat(input.getHeight(), input.getWidth(), cv_type, input.getPtr<sl::uchar1>(sl::MEM_CPU));
-}
-
-cv::Mat zed_capture_rgb(sl::Camera &zed) {
-    sl::Mat left;
-    zed.retrieveImage(left);
-    return slMat2cvMat(left).clone();
-}
-
-cv::Mat zed_capture_3d(sl::Camera &zed) {
-    sl::Mat cur_cloud;
-    zed.retrieveMeasure(cur_cloud, sl::MEASURE_XYZ);
-    return slMat2cvMat(cur_cloud).clone();
-}
-
-static sl::Camera zed; // ZED-camera
-
-#else   // ZED_STEREO
 std::vector<bbox_t> get_3d_coordinates(std::vector<bbox_t> bbox_vect, cv::Mat xyzrgba) {
     return bbox_vect;
 }
-#endif  // ZED_STEREO
-
 
 #include <opencv2/opencv.hpp>            // C++
 #include <opencv2/core/version.hpp>
@@ -154,13 +26,6 @@ std::vector<bbox_t> get_3d_coordinates(std::vector<bbox_t> bbox_vect, cv::Mat xy
 #define OPENCV_VERSION CVAUX_STR(CV_VERSION_MAJOR)"" CVAUX_STR(CV_VERSION_MINOR)"" CVAUX_STR(CV_VERSION_REVISION)
 #ifndef USE_CMAKE_LIBS
 #pragma comment(lib, "opencv_world" OPENCV_VERSION ".lib")
-#ifdef TRACK_OPTFLOW
-#pragma comment(lib, "opencv_cudaoptflow" OPENCV_VERSION ".lib")
-#pragma comment(lib, "opencv_cudaimgproc" OPENCV_VERSION ".lib")
-#pragma comment(lib, "opencv_core" OPENCV_VERSION ".lib")
-#pragma comment(lib, "opencv_imgproc" OPENCV_VERSION ".lib")
-#pragma comment(lib, "opencv_highgui" OPENCV_VERSION ".lib")
-#endif    // TRACK_OPTFLOW
 #endif    // USE_CMAKE_LIBS
 #else
 #define OPENCV_VERSION CVAUX_STR(CV_VERSION_EPOCH)"" CVAUX_STR(CV_VERSION_MAJOR)"" CVAUX_STR(CV_VERSION_MINOR)
@@ -178,6 +43,9 @@ void draw_boxes(cv::Mat mat_img, std::vector<bbox_t> result_vec, std::vector<std
     int const colors[6][3] = { { 1,0,1 },{ 0,0,1 },{ 0,1,1 },{ 0,1,0 },{ 1,1,0 },{ 1,0,0 } };
 
     for (auto &i : result_vec) {
+#ifdef ROI
+        i.x += 30; i.y += 180;
+#endif
         cv::Scalar color = obj_id_to_color(i.obj_id);
         cv::rectangle(mat_img, cv::Rect(i.x, i.y, i.w, i.h), color, 2);
         if (obj_names.size() > i.obj_id) {
@@ -185,8 +53,6 @@ void draw_boxes(cv::Mat mat_img, std::vector<bbox_t> result_vec, std::vector<std
             if (i.track_id > 0) obj_name += " - " + std::to_string(i.track_id);
             cv::Size const text_size = getTextSize(obj_name, cv::FONT_HERSHEY_COMPLEX_SMALL, 1.2, 2, 0);
             int max_width = (text_size.width > i.w + 2) ? text_size.width : (i.w + 2);
-            max_width = std::max(max_width, (int)i.w + 2);
-            //max_width = std::max(max_width, 283);
             std::string coords_3d;
             if (!std::isnan(i.z_3d)) {
                 std::stringstream ss;
@@ -201,7 +67,7 @@ void draw_boxes(cv::Mat mat_img, std::vector<bbox_t> result_vec, std::vector<std
                 cv::Point2f(std::min((int)i.x + max_width, mat_img.cols - 1), std::min((int)i.y, mat_img.rows - 1)),
                 color, CV_FILLED, 8, 0);
             putText(mat_img, obj_name, cv::Point2f(i.x, i.y - 16), cv::FONT_HERSHEY_COMPLEX_SMALL, 1.2, cv::Scalar(0, 0, 0), 2);
-            if(!coords_3d.empty()) putText(mat_img, coords_3d, cv::Point2f(i.x, i.y-1), cv::FONT_HERSHEY_COMPLEX_SMALL, 0.8, cv::Scalar(0, 0, 0), 1);
+            if (!coords_3d.empty()) putText(mat_img, coords_3d, cv::Point2f(i.x, i.y - 1), cv::FONT_HERSHEY_COMPLEX_SMALL, 0.8, cv::Scalar(0, 0, 0), 1);
         }
     }
     if (current_det_fps >= 0 && current_cap_fps >= 0) {
@@ -226,7 +92,7 @@ std::vector<std::string> objects_names_from_file(std::string const filename) {
     std::ifstream file(filename);
     std::vector<std::string> file_lines;
     if (!file.is_open()) return file_lines;
-    for(std::string line; getline(file, line);) file_lines.push_back(line);
+    for (std::string line; getline(file, line);) file_lines.push_back(line);
     std::cout << "object names loaded \n";
     return file_lines;
 }
@@ -249,7 +115,7 @@ public:
     T receive() {
         std::unique_ptr<T> ptr;
         do {
-            while(!a_ptr.load()) std::this_thread::sleep_for(std::chrono::milliseconds(3));
+            while (!a_ptr.load()) std::this_thread::sleep_for(std::chrono::milliseconds(3));
             ptr.reset(a_ptr.exchange(NULL));
         } while (!ptr);
         T obj = *ptr;
@@ -266,10 +132,10 @@ public:
 
 int main(int argc, char *argv[])
 {
-    std::string  names_file = "data/coco.names";
-    std::string  cfg_file = "cfg/yolov3.cfg";
-    std::string  weights_file = "yolov3.weights";
-    std::string filename;
+    std::string  names_file = "data/obj.names";
+    std::string  cfg_file = "data/obj.cfg";
+    std::string  weights_file = "data/obj_final.weights";
+    std::string filename = "data/damage.jpg";
 
     if (argc > 4) {    //voc.names yolo-voc.cfg yolo-voc.weights test.mp4
         names_file = argv[1];
@@ -284,24 +150,18 @@ int main(int argc, char *argv[])
     Detector detector(cfg_file, weights_file);
 
     auto obj_names = objects_names_from_file(names_file);
-    std::string out_videofile = "result.avi";
+    std::string out_videofile = "detected/result.avi";
     bool const save_output_videofile = false;   // true - for history
     bool const send_network = false;        // true - for remote detection
     bool const use_kalman_filter = false;   // true - for stationary camera
 
     bool detection_sync = true;             // true - for video-file
-#ifdef TRACK_OPTFLOW    // for slow GPU
-    detection_sync = false;
-    Tracker_optflow tracker_flow;
-    //detector.wait_stream = true;
-#endif  // TRACK_OPTFLOW
-
 
     while (true)
     {
-        std::cout << "input image or video filename: ";
+        /*std::cout << "input image or video filename: ";
         if(filename.size() == 0) std::cin >> filename;
-        if (filename.size() == 0) break;
+        if (filename.size() == 0) break;*/
 
         try {
 #ifdef OPENCV
@@ -328,34 +188,13 @@ int main(int argc, char *argv[])
 
                 track_kalman_t track_kalman;
 
-#ifdef ZED_STEREO
-                sl::InitParameters init_params;
-                init_params.depth_minimum_distance = 0.5;
-                init_params.depth_mode = sl::DEPTH_MODE_ULTRA;
-                init_params.camera_resolution = sl::RESOLUTION_HD720;
-                init_params.coordinate_units = sl::UNIT_METER;
-                //init_params.sdk_cuda_ctx = (CUcontext)detector.get_cuda_context();
-                init_params.sdk_gpu_id = detector.cur_gpu_id;
-                init_params.camera_buffer_count_linux = 2;
-                if (file_ext == "svo") init_params.svo_input_filename.set(filename.c_str());
-                if (filename == "zed_camera" || file_ext == "svo") {
-                    std::cout << "ZED 3D Camera " << zed.open(init_params) << std::endl;
-                    if (!zed.isOpened()) {
-                        std::cout << " Error: ZED Camera should be connected to USB 3.0. And ZED_SDK should be installed. \n";
-                        getchar();
-                        return 0;
-                    }
-                    cur_frame = zed_capture_rgb(zed);
-                    use_zed_camera = true;
-                }
-#endif  // ZED_STEREO
-
                 cv::VideoCapture cap;
                 if (filename == "web_camera") {
                     cap.open(0);
                     video_fps = cap.get(CV_CAP_PROP_FPS);
                     cap >> cur_frame;
-                } else if (!use_zed_camera) {
+                }
+                else if (!use_zed_camera) {
                     cap.open(filename);
                     video_fps = cap.get(CV_CAP_PROP_FPS);
                     cap >> cur_frame;
@@ -377,7 +216,6 @@ int main(int argc, char *argv[])
                     uint64_t frame_id;
                     bool exit_flag;
                     cv::Mat zed_cloud;
-                    std::queue<cv::Mat> track_optflow_queue;
                     detection_data_t() : exit_flag(false), new_detection(false) {}
                 };
 
@@ -395,14 +233,7 @@ int main(int argc, char *argv[])
                     detection_data_t detection_data;
                     do {
                         detection_data = detection_data_t();
-#ifdef ZED_STEREO
-                        if (use_zed_camera) {
-                            while (zed.grab() != sl::SUCCESS) std::this_thread::sleep_for(std::chrono::milliseconds(2));
-                            detection_data.cap_frame = zed_capture_rgb(zed);
-                            detection_data.zed_cloud = zed_capture_3d(zed);
-                        }
-                        else
-#endif   // ZED_STEREO
+
                         {
                             cap >> detection_data.cap_frame;
                         }
@@ -451,7 +282,7 @@ int main(int argc, char *argv[])
                         det_image = detection_data.det_image;
                         std::vector<bbox_t> result_vec;
 
-                        if(det_image)
+                        if (det_image)
                             result_vec = detector.detect_resized(*det_image, frame_size.width, frame_size.height, thresh, true);  // true
                         fps_det_counter++;
                         //std::this_thread::sleep_for(std::chrono::milliseconds(150));
@@ -466,7 +297,6 @@ int main(int argc, char *argv[])
                 // draw rectangles (and track objects)
                 t_draw = std::thread([&]()
                 {
-                    std::queue<cv::Mat> track_optflow_queue;
                     detection_data_t detection_data;
                     do {
 
@@ -494,22 +324,6 @@ int main(int argc, char *argv[])
                         cv::Mat cap_frame = detection_data.cap_frame;
                         cv::Mat draw_frame = detection_data.cap_frame.clone();
                         std::vector<bbox_t> result_vec = detection_data.result_vec;
-
-#ifdef TRACK_OPTFLOW
-                        if (detection_data.new_detection) {
-                            tracker_flow.update_tracking_flow(detection_data.cap_frame, detection_data.result_vec);
-                            while (track_optflow_queue.size() > 0) {
-                                draw_frame = track_optflow_queue.back();
-                                result_vec = tracker_flow.tracking_flow(track_optflow_queue.front(), false);
-                                track_optflow_queue.pop();
-                            }
-                        }
-                        else {
-                            track_optflow_queue.push(cap_frame);
-                            result_vec = tracker_flow.tracking_flow(cap_frame, false);
-                        }
-                        detection_data.new_detection = true;    // to correct kalman filter
-#endif //TRACK_OPTFLOW
 
                         // track ID by using kalman filter
                         if (use_kalman_filter) {
@@ -555,7 +369,7 @@ int main(int argc, char *argv[])
                         cv::Mat output_frame;
                         do {
                             detection_data = draw2write.receive();
-                            if(detection_data.draw_frame.channels() == 4) cv::cvtColor(detection_data.draw_frame, output_frame, CV_RGBA2RGB);
+                            if (detection_data.draw_frame.channels() == 4) cv::cvtColor(detection_data.draw_frame, output_frame, CV_RGBA2RGB);
                             else output_frame = detection_data.draw_frame;
                             output_video << output_frame;
                         } while (!detection_data.exit_flag);
@@ -606,7 +420,7 @@ int main(int argc, char *argv[])
                     if (key == 'f') show_small_boxes = !show_small_boxes;
                     if (key == 'p') while (true) if (cv::waitKey(100) == 'p') break;
                     //if (key == 'e') extrapolate_flag = !extrapolate_flag;
-                    if (key == 27) { exit_flag = true;}
+                    if (key == 27) { exit_flag = true; }
 
                     //std::cout << " current_fps_det = " << current_fps_det << ", current_fps_cap = " << current_fps_cap << std::endl;
                 } while (!detection_data.exit_flag);
@@ -628,23 +442,51 @@ int main(int argc, char *argv[])
             else if (file_ext == "txt") {    // list of image files
                 std::ifstream file(filename);
                 if (!file.is_open()) std::cout << "File not found! \n";
-                else
+                else {
                     for (std::string line; file >> line;) {
                         std::cout << line << std::endl;
+
                         cv::Mat mat_img = cv::imread(line);
+                        cv::Size resized(416, 416);
+                        cv::Mat mat_resized;
+                        cv::resize(mat_img, mat_resized, resized);
+#ifdef ROI
+                        cv::Rect roi = cv::Rect(30, 180, 600, 200);
+                        cv::Mat mat_roi = mat_img(roi);
+                        rectangle(mat_img, roi, cv::Scalar(0, 255, 0), 1, 8, 0);
+                        auto start = std::chrono::steady_clock::now();
+                        std::vector<bbox_t> result_vec = detector.detect(mat_roi);
+                        auto end = std::chrono::steady_clock::now();
+#else
+                        auto start = std::chrono::steady_clock::now();
                         std::vector<bbox_t> result_vec = detector.detect(mat_img);
+                        auto end = std::chrono::steady_clock::now();
+#endif
+                        std::chrono::duration<double> spent = end - start;
+                        std::cout << " Time: " << spent.count() << " sec\n";
+                        draw_boxes(mat_img, result_vec, obj_names);
                         show_console_result(result_vec, obj_names);
-                        //draw_boxes(mat_img, result_vec, obj_names);
-                        //cv::imwrite("res_" + line, mat_img);
+                        cv::imwrite("detected/" + line.substr(line.rfind("/") + 1), mat_img);
                     }
+                }
 
             }
             else {    // image file
                 cv::Mat mat_img = cv::imread(filename);
-
+                //cv::Size resized (416,416);
+                //cv::resize (mat_img, mat_img, resized);
+#ifdef ROI
+                cv::Rect roi = cv::Rect(30, 180, 600, 200);
+                cv::Mat mat_roi = mat_img(roi);
+                rectangle(mat_img, roi, cv::Scalar(0, 255, 0), 1, 8, 0);
+                auto start = std::chrono::steady_clock::now();
+                std::vector<bbox_t> result_vec = detector.detect(mat_roi);
+                auto end = std::chrono::steady_clock::now();
+#else
                 auto start = std::chrono::steady_clock::now();
                 std::vector<bbox_t> result_vec = detector.detect(mat_img);
                 auto end = std::chrono::steady_clock::now();
+#endif
                 std::chrono::duration<double> spent = end - start;
                 std::cout << " Time: " << spent.count() << " sec \n";
 
@@ -653,6 +495,7 @@ int main(int argc, char *argv[])
                 cv::imshow("window name", mat_img);
                 show_console_result(result_vec, obj_names);
                 cv::waitKey(0);
+                break;
             }
 #else   // OPENCV
             //std::vector<bbox_t> result_vec = detector.detect(filename);
